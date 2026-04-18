@@ -210,35 +210,34 @@ class matrix_drop:
 		self.current_y_pos = 0
 		self.x_pos = x_pos
 		self.velocity = velocity
-		self.gradient_1 = random.choice(["Ñ", "$", "#", "&", "@"])
-		self.gradient_2 = [random.choice(["I", "|", "i"]) for _ in range(3)]
-		self.gradient_3 = random.choice([":", ";"])
 		self.dead = False
+
+		self.gradient_1 = random.choice(["Ñ", "$", "#", "&", "@"])
+		
+		self.trail_length = random.randint(33, 42)
+		self.quarter = self.trail_length // 4
+
 	def update(self):
 		current_time = pygame.time.get_ticks()
 		if (current_time - self.drop_delay) - self.drop_start_time > 0:
 			self.current_y_pos += 1
 			self.drop_delay += self.velocity
+
 			self.gradient_1 = random.choice(["Ñ", "$", "#", "&", "@"])
-			self.gradient_2 = [random.choice(["I", "|", "i"]) for _ in range(3)]
-			self.gradient_3 = random.choice([":", ";"])
+			self.gradient_2 = [random.choice(["I", "|", "i"]) for _ in range(self.quarter)]
+			self.gradient_3 = [random.choice([":", ";"]) for _ in range(self.quarter)]
+			self.gradient_4 = ["∙" for _ in range(self.quarter)]
+			self.gradient_5 = ["·" for _ in range(self.quarter)]
+			self.gradient_list = [self.gradient_2, self.gradient_3, self.gradient_4, self.gradient_5]
+
 		if self.current_y_pos < rows:
 			matrix_grid[self.current_y_pos][self.x_pos] = self.gradient_1
-		if 0 <= self.current_y_pos - 1 < rows:
-			matrix_grid[self.current_y_pos - 1][self.x_pos] = self.gradient_2[0]
-		if 0 <= self.current_y_pos - 2 < rows:
-			matrix_grid[self.current_y_pos - 2][self.x_pos] = self.gradient_2[1]
-		if 0 <= self.current_y_pos - 3 < rows:
-			matrix_grid[self.current_y_pos - 3][self.x_pos] = self.gradient_2[2]
-		if 0 <= self.current_y_pos - 4 < rows:
-			matrix_grid[self.current_y_pos - 4][self.x_pos] = self.gradient_3
-		if 0 <= self.current_y_pos - 5 < rows:
-			matrix_grid[self.current_y_pos - 5][self.x_pos] = "∙"
-		if 0 <= self.current_y_pos - 6 < rows:
-			matrix_grid[self.current_y_pos - 6][self.x_pos] = "·"
-		if 0 <= self.current_y_pos - 7 < rows:
-			matrix_grid[self.current_y_pos - 7][self.x_pos] = "·"
-		if self.current_y_pos - 7 >= rows:
+		for current_qrtr in range(1, 5):
+			for i in range(self.current_y_pos - current_qrtr * self.quarter, self.current_y_pos - (current_qrtr - 1) * self.quarter):
+				if 0 <= i < rows:
+					idx = i - (self.current_y_pos - current_qrtr * self.quarter)
+					matrix_grid[i][self.x_pos] = self.gradient_list[current_qrtr - 1][idx]
+		if self.current_y_pos - self.trail_length >= rows:
 			self.dead = True
 #Inicio programa
 grids.append(copy.deepcopy(grid))
