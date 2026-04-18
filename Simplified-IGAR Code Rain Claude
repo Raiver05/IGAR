@@ -1,0 +1,394 @@
+import pygame
+import copy
+import random
+
+pygame.init()
+								# Pantalla Configuracion
+monitor_info = pygame.display.Info()
+screen_x : int = monitor_info.current_w
+screen_y : int = monitor_info.current_h
+rect_x : int = 8
+rect_y : int = 16
+screen : pygame.Surface = pygame.display.set_mode((screen_x, screen_y), pygame.NOFRAME)
+pygame.display.set_caption(" ")
+
+								# Portapapeles Modulos Necesarios
+								# Fuente Configuracion
+font : pygame.font.Font = pygame.font.Font("IGAR_data/IGAR.ttf", 16)
+
+								# Columnas y Filas
+cols : int = screen_x // rect_x
+rows : int = screen_y // rect_y
+
+								# Variables
+is_fullscreen : bool = True
+running : bool = True
+
+selected_cell : tuple[int, int] | None = None
+
+last_export_path : str | None = None
+current_file_path : str | None = None	# Archivo actual
+
+grids : list[list[list[str]]] = []
+grid : list[list[str]] = [[" " for x in range(cols)] for y in range(rows)]
+current_grid : int = 0
+
+saved_icon = pygame.image.load("IGAR_data/save_icon_1.png").convert_alpha()
+not_saved_icon = pygame.image.load("IGAR_data/save_icon_2.png").convert_alpha()
+
+highlight_timer : int | None = None
+highlight_state : int = 1
+
+needs_redraw : bool = True
+
+text_cache : dict[str, pygame.Surface] = {}
+
+key_repeat_delay : int = 500																			# Repetición de teclas
+key_repeat_interval : int = 30
+pygame.key.set_repeat(key_repeat_delay, key_repeat_interval)
+
+drawing_mode_on : bool = False
+
+past_mouse_pos : list[str] = [0,0]
+
+grided_pos : list[str]
+
+conway_mode : bool = False
+matrix_grid : list[list[str]] = [[" " for x in range(cols)] for y in range(rows)]
+matrix_mode : bool = False	
+matrix_start_time : int = 0
+matrix_delay : int = 0
+matrix_drops : list = []
+
+# Grilla Cambio
+def grid_changed() -> None:
+	global grids, current_grid
+	if current_grid + 1 < len(grids):
+		grids = grids[:current_grid + 1]
+	grids.append(copy.deepcopy(grid))
+	current_grid = len(grids) - 1
+
+def undo() -> None:
+	global grid, current_grid, needs_redraw
+	if current_grid > 0:
+		current_grid -= 1
+		grid = copy.deepcopy(grids[current_grid])
+		needs_redraw = True
+	else:
+		pass
+
+def redo() -> None:
+	global grid, current_grid, needs_redraw
+	if current_grid < len(grids) - 1:
+		current_grid += 1
+		grid = copy.deepcopy(grids[current_grid])
+		needs_redraw = True
+	else:
+		pass
+
+
+# Mueve Celda Seleccionada
+def move_selected_cell(direction : str) -> None:
+	global selected_cell, needs_redraw
+	if selected_cell != None:
+		if direction == "up":
+			selected_cell = (max(selected_cell[0] - 1, 0), selected_cell[1])
+		elif direction == "down":
+			selected_cell = (min(selected_cell[0] + 1, rows - 1), selected_cell[1])
+		elif direction == "left":
+			selected_cell = (selected_cell[0], max(selected_cell[1] - 1, 0))
+		elif direction == "right":
+			selected_cell = (selected_cell[0], min(selected_cell[1] + 1, cols - 1))
+		needs_redraw = True
+
+# Establece Caracter de Celda
+def set_selected_cells_value(character : str) -> None:
+	global selected_cell, needs_redraw
+	if selected_cell != None:
+		grid[selected_cell[0]][selected_cell[1]] = character
+		selected_cell = (selected_cell[0], min(selected_cell[1] + 1, cols - 1))
+		needs_redraw = True
+		grid_changed()
+
+# Borra Caracter de Celda
+def erase_selected_cells() -> None:
+	global selected_cell, needs_redraw
+	if selected_cell != None:
+		grid[selected_cell[0]][selected_cell[1]] = " "
+		needs_redraw = True
+		grid_changed()
+
+# Dibuja Caracteres en Pantalla
+def draw_ascii() -> None:
+	for y in range(rows):
+		for x in range(cols):
+			cell = grid[y][x]
+			if isinstance(cell, str) and cell != " " and cell != "":
+				screen.blit(get_text_surface(cell), (x * rect_x, y * rect_y))
+
+def get_text_surface(char : str) -> pygame.Surface:
+	if char not in text_cache:
+		text_cache[char] = font.render(char, True, (255, 255, 255))
+	return text_cache[char]
+
+
+# Destaca Celda Seleccionada
+def handle_highlight_timer() -> None:												# Maneja Contador Destaque Celda
+	global highlight_timer, highlight_state, needs_redraw
+	if highlight_timer != None:
+		current_time = pygame.time.get_ticks()
+		if current_time - highlight_timer >= 500:
+			highlight_state = 1 - highlight_state
+			highlight_timer = current_time
+			needs_redraw = True
+
+def highlight_selected_cell() -> None:												# Destaca Celda Seleccionada
+	if selected_cell != None:
+		rect_area = pygame.Rect(selected_cell[1] * rect_x, selected_cell[0] * rect_y, rect_x, rect_y)
+		
+		if highlight_state == 1 and screen.get_rect().contains(rect_area):
+			sub_surface : pygame.Surface = screen.subsurface(rect_area).copy()
+			inverted : pygame.Surface = pygame.Surface((rect_x, rect_y))
+			for py in range(rect_y):
+				for px in range(rect_x):
+					color : pygame.Color = sub_surface.get_at((px, py))
+					inv_color : tuple[int, int, int] = (255 - color.r, 255 - color.g, 255 - color.b)
+					inverted.set_at((px, py), inv_color)
+			screen.blit(inverted, rect_area.topleft)
+
+def	draw_line(first_point : tuple[int], second_point : tuple[int], char : str = "$"):
+	if (second_point[1] - first_point[1]) != 0:
+		m = (second_point[0] - first_point[0]) / (second_point[1] - first_point[1])
+		if m != None and m != 0:
+			x_start, x_end = sorted([first_point[1], second_point[1]])
+			for x in range(x_start, x_end + 1): 
+				y = int(m * (x - first_point[1]) + first_point[0])
+				grid[y][x] = char
+			y_start, y_end = sorted([first_point[0], second_point[0]])
+			for y in range(y_start, y_end + 1): 
+				x = int(((y - first_point[0])/m) + first_point[1])
+				grid[y][x] = char
+			print("S")
+
+def draw_circle():
+	for x in range(first_point[1], second_point[1]):
+		a = abs(second_point[1] + first_point[1])
+		b = abs(second_point[0] + first_point[0])
+		y = int((-(x - a)**2 + 16) ** 0.5 + b)
+		grid[y][x] = "$"
+def conway():
+    global conway_mode, grid, grid_changed, needs_redraw
+    conway_mode = True
+
+    while conway_mode:
+        for event in pygame.event.get():
+            pass
+
+        print("A")
+
+        if pygame.key.get_pressed()[pygame.K_ESCAPE]:
+            print("B")
+            conway_mode = False
+def matrix():
+	global matrix_mode, matrix_start_time, matrix_delay
+	matrix_mode = True
+	matrix_start_time = pygame.time.get_ticks()
+	matrix_delay = 0
+
+def draw_matrix_ascii():
+	for y in range(rows):
+		for x in range(cols):
+			cell = matrix_grid[y][x]
+			if isinstance(cell, str) and cell != " " and cell != "":
+				screen.blit(get_text_surface(cell), (x * rect_x, y * rect_y))
+
+class matrix_drop:
+	
+	def __init__(self, x_pos, velocity):
+		self.drop_start_time = pygame.time.get_ticks()
+		self.drop_delay = 0
+		self.current_y_pos = 0
+		self.x_pos = x_pos
+		self.velocity = velocity
+		self.gradient_1 = random.choice(["Ñ", "$", "#", "&", "@"])
+		trail_length = random.randint(33, 42)
+		remaining = trail_length - 1
+		quarter = remaining // 4
+		self.trail_chars = []
+		self.dead = False
+		for i in range(quarter):
+			self.trail_chars.append(random.choice(["I", "|", "i", "{", "}", "[", "]"]))
+		for i in range(quarter):
+			self.trail_chars.append(random.choice([":", ";"]))
+		for i in range(quarter):
+			self.trail_chars.append("∙")
+		for i in range(remaining - quarter * 3):
+			self.trail_chars.append("·")
+
+	def update(self):
+		current_time = pygame.time.get_ticks()
+		if (current_time - self.drop_delay) - self.drop_start_time > 0:
+			self.current_y_pos += 1
+			self.drop_delay += self.velocity
+			self.gradient_1 = random.choice(["Ñ", "$", "#", "&", "@"])
+
+		if self.current_y_pos < rows:
+			matrix_grid[self.current_y_pos][self.x_pos] = self.gradient_1
+		for i, char in enumerate(self.trail_chars):
+			y = self.current_y_pos - 1 - i
+			if 0 <= y < rows:
+				matrix_grid[y][self.x_pos] = char
+
+		if self.current_y_pos - len(self.trail_chars) >= rows:
+			self.dead = True
+
+#Inicio programa
+grids.append(copy.deepcopy(grid))
+clock : pygame.time.Clock = pygame.time.Clock()
+
+# Maneja Inputs
+while running:
+	handle_highlight_timer()
+
+# INPUTS-INPUTS-INPUTS-INPUTS-INPUTS-INPUTS-INPUTS-INPUTS-INPUTS-INPUTS-INPUTS-INPUTS-INPUTS-INPUTS
+	for event in pygame.event.get():
+	#Cerrar IGAR
+		if event.type == pygame.QUIT:
+			running = False
+
+# MOUSE-MOUSE-MOUSE-MOUSE-MOUSE-MOUSE-MOUSE-MOUSE-MOUSE-MOUSE-MOUSE-MOUSE
+		elif event.type == pygame.MOUSEBUTTONDOWN:
+			if event.button == 1:							# Click Izq - Seleccionar Cell
+				if not drawing_mode_on:
+					selected_cell = (clicked_row, clicked_col)
+					highlight_timer = pygame.time.get_ticks()
+					highlight_state = 1
+					needs_redraw = True
+			elif event.button == 3:							# Click Der - Deseleccionar Grid
+				selected_cell = None
+		elif event.type == pygame.MOUSEMOTION:
+			mouse_x : int
+			mouse_y : int
+			mouse_x, mouse_y = event.pos					# Posicion del Mouse
+			clicked_col : int = min(mouse_x // rect_x, cols - 1)
+			clicked_row : int = min(mouse_y // rect_y, rows - 1)
+			grided_pos : list[str] = (clicked_row, clicked_col)
+			
+			if pygame.mouse.get_pressed()[0] and drawing_mode_on:
+				grid[clicked_row][clicked_col] = "$"
+				needs_redraw = True
+				draw_line(past_mouse_pos, grided_pos)
+			
+			elif pygame.mouse.get_pressed()[2] and drawing_mode_on:
+				grid[clicked_row][clicked_col] = " "
+				needs_redraw = True
+				draw_line(past_mouse_pos, grided_pos, " ")
+			past_mouse_pos = grided_pos
+		elif event.type == pygame.MOUSEBUTTONUP:
+			if event.button == 1 and drawing_mode_on:
+				grid_changed()	
+# TECLADO-TECLADO-TECLADO-TECLADO-TECLADO-TECLADO-TECLADO-TECLADO-TECLADO
+		elif event.type == pygame.KEYDOWN:
+			highlight_timer = pygame.time.get_ticks()
+			highlight_state = 1
+			needs_redraw = True
+			if event.mod & pygame.KMOD_CTRL:
+				if event.key == pygame.K_z:
+					undo()
+				elif event.key == pygame.K_y:
+					redo()
+
+# Funcionalidades Especiales
+			elif event.key == pygame.K_F8:											# F8 - Cerrar IGAR
+				running = False
+
+			elif event.key == pygame.K_F11:											# F11 - Toggle Fullscren
+				if is_fullscreen:
+					screen = pygame.display.set_mode((screen_x * 0.5, screen_y * 0.5))
+					is_fullscreen = False
+				else:
+					screen = pygame.display.set_mode((screen_x, screen_y), pygame.NOFRAME)
+					is_fullscreen = True
+				needs_redraw = True
+
+# No escribir si se está usando Ctrl
+			if event.mod & pygame.KMOD_CTRL and not event.mod & pygame.KMOD_RALT:
+				if event.key == pygame.K_c:														# Ctrl + C - Alternar Conway
+					conway()
+				elif event.key == pygame.K_d:													# Ctrl + D - Alternar Dibujo
+					drawing_mode_on = not drawing_mode_on
+				elif event.key == pygame.K_1:													# Ctrl + 1 - Determinar Primer Punto
+					if selected_cell != None:
+						first_point = selected_cell
+				elif event.key == pygame.K_2:													# Ctrl + 2 - Determinar Segundo Punto
+					if selected_cell != None:
+						second_point  = selected_cell
+				elif event.key == pygame.K_3:													# Ctrl + 3 - Dibujar Línea
+					if first_point != None and second_point != None:
+						draw_line()
+				elif event.key == pygame.K_4:													# Ctrl + 4 - Dibujar Círculo
+					if first_point != None and second_point != None:
+						draw_circle()
+				elif event.key == pygame.K_m:													# Ctrl + M - Alternar Matrix
+					matrix()
+				elif event.key == pygame.K_t:													# Ctrl + T - Testing Testing
+					print(matrix_drops)
+			if event.mod & pygame.KMOD_CTRL and not event.mod & pygame.KMOD_RALT:		# No escribir si se está usando Ctrl
+				continue
+# CARACTERES-CARACTERES-CARACTERES-CARACTERES-CARACTERES-CARACTERES-CARACTERES
+			if selected_cell != None:
+				if event.key == pygame.K_ESCAPE and matrix_mode:
+					matrix_mode = False
+				elif event.key == pygame.K_BACKSPACE:											# Backspace
+					move_selected_cell("left")
+					erase_selected_cells()
+				elif event.key == pygame.K_RETURN:											# Enter
+					move_selected_cell("down")
+				elif event.key == pygame.K_TAB:
+					selected_cell = (selected_cell[0], min(selected_cell[1] + 4, cols - 1))	# Tab
+					needs_redraw = True
+				elif event.key == pygame.K_DELETE:											# Supr
+					erase_selected_cells()
+					for cell in range(selected_cell[1], cols - 1):
+						grid[selected_cell[0]][cell] = grid[selected_cell[0]][cell + 1]
+					needs_redraw = True
+					grid_changed()
+				elif event.key == pygame.K_SPACE:											# Space
+					erase_selected_cells()
+					move_selected_cell("right")
+				elif event.key == pygame.K_UP:
+					move_selected_cell("up")						# Up
+				elif event.key == pygame.K_DOWN:
+					move_selected_cell("down")					# Down
+				elif event.key == pygame.K_LEFT:
+					move_selected_cell("left")					# Left
+				elif event.key == pygame.K_RIGHT:
+					move_selected_cell("right")				# Right
+				else:																		# Demas Caracteres
+					char : str = event.unicode
+					if char != "":
+						set_selected_cells_value(char)
+	if matrix_mode:
+		current_time = pygame.time.get_ticks()
+
+		if (current_time - matrix_delay) - matrix_start_time > 0:
+			matrix_drops.append(matrix_drop(random.randint(0, cols - 1), random.randint(25, 200)))
+			matrix_delay += random.randint(50, 100)
+
+	matrix_grid = [[" " for x in range(cols)] for y in range(rows)]
+	for drop in matrix_drops[:]:
+		drop.update()
+		if drop.dead:
+			matrix_drops.remove(drop)
+	needs_redraw = True
+
+	if needs_redraw:
+		screen.fill((0, 0, 0))		# Poner el fondo negro
+		draw_matrix_ascii()
+		draw_ascii()				# Dibujar Caracteres
+		highlight_selected_cell()
+		pygame.display.update()		# Actualizar Screen
+		needs_redraw = False
+	clock.tick(60)
+	
+pygame.quit()
