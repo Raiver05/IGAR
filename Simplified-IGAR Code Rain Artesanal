@@ -233,10 +233,10 @@ class matrix_drop:
 		if self.current_y_pos < rows:
 			matrix_grid[self.current_y_pos][self.x_pos] = self.gradient_1
 		for current_qrtr in range(1, 5):
-			for i in range(self.current_y_pos - current_qrtr * self.quarter, self.current_y_pos - (current_qrtr - 1) * self.quarter):
+			quarter_y_pos = self.current_y_pos - current_qrtr * self.quarter
+			for i in range(quarter_y_pos, self.current_y_pos - (current_qrtr - 1) * self.quarter):
 				if 0 <= i < rows:
-					idx = i - (self.current_y_pos - current_qrtr * self.quarter)
-					matrix_grid[i][self.x_pos] = self.gradient_list[current_qrtr - 1][idx]
+					matrix_grid[i][self.x_pos] = self.gradient_list[current_qrtr - 1][i - (quarter_y_pos)]
 		if self.current_y_pos - self.trail_length >= rows:
 			self.dead = True
 #Inicio programa
