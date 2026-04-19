@@ -1,6 +1,7 @@
 import pygame
 import copy
 import random
+import math
 
 pygame.init()
 								# Pantalla Configuracion
@@ -48,7 +49,7 @@ key_repeat_interval : int = 30
 pygame.key.set_repeat(key_repeat_delay, key_repeat_interval)
 
 drawing_mode_on : bool = False
-
+dna_angle : float = 0.0
 past_mouse_pos : list[str] = [0,0]
 
 grided_pos : list[str]
@@ -59,6 +60,9 @@ matrix_mode : bool = False
 matrix_start_time : int = 0
 matrix_delay : int = 0
 matrix_drops : list = []
+
+dna_mode : bool = False
+dna_width : int = 7
 
 # Grilla Cambio
 def grid_changed() -> None:
@@ -195,6 +199,82 @@ def matrix():
 	matrix_start_time = pygame.time.get_ticks()
 	matrix_delay = 0
 
+def dna():
+	global dna_mode
+	dna_mode = not dna_mode
+
+def draw_dna():
+	global matrix_drops
+
+	if random.random() < 0.15:
+		matrix_drops.append(
+			dna_drop(
+				random.randint(0, cols - 1),
+				random.randint(25, 80)
+			)
+		)
+class dna_drop:
+	
+	def __init__(self, base_x : int, velocity : int):
+		self.drop_start_time : int = pygame.time.get_ticks()
+		self.drop_delay : int = 0
+		self.current_y_pos : int = 0
+
+		self.base_x : int = base_x
+		self.velocity : int = velocity
+		self.dead : bool = False
+
+		self.trail_length : int = random.randint(20, 35)
+		self.quarter : int = self.trail_length // 4
+
+		self.phase : float = random.random() * 10
+		self.rotation_offset : float = 0
+
+	def update(self):
+		current_time : int = pygame.time.get_ticks()
+
+		if (current_time - self.drop_delay) - self.drop_start_time > 0:
+			self.current_y_pos += 1
+			self.drop_delay += self.velocity
+
+		self.rotation_offset += 0.1
+
+		amplitude : float = 2.5
+		frequency : float = 0.9
+
+		for i in range(self.trail_length):
+			y : int = self.current_y_pos - i
+			if not (0 <= y < rows):
+				continue
+
+			angle : float = y * frequency + self.phase
+			rotation_angle : float = (y * 0.2) + self.rotation_offset
+			apparent_amplitude : float = amplitude * abs(math.cos(rotation_angle))
+
+			noise1 : int = int(math.sin(y * 0.7))
+			noise2 : int = int(math.cos(y * 0.6))
+
+			x1 : int = int(self.base_x + apparent_amplitude * math.sin(angle)) + noise1
+			x2 : int = int(self.base_x + apparent_amplitude * math.sin(angle + 2.1)) + noise2
+
+			if i == 0:
+				char : str = random.choice(["Ñ", "$", "#", "&", "@"])
+			elif i < self.trail_length * 0.25:
+				char : str = random.choice(["I", "|", "i"])
+			elif i < self.trail_length * 0.5:
+				char : str = random.choice([":", ";"])
+			elif i < self.trail_length * 0.75:
+				char : str = "∙"
+			else:
+				char : str = "·"
+
+			if 0 <= x1 < cols:
+				matrix_grid[y][x1] = char
+			if 0 <= x2 < cols:
+				matrix_grid[y][x2] = char
+
+		if self.current_y_pos - self.trail_length >= rows:
+			self.dead = True
 def draw_matrix_ascii():
 	for y in range(rows):
 		for x in range(cols):
@@ -210,38 +290,35 @@ class matrix_drop:
 		self.current_y_pos = 0
 		self.x_pos = x_pos
 		self.velocity = velocity
-		self.gradient_1 = random.choice(["Ñ", "$", "#", "&", "@"])
-		trail_length = random.randint(33, 42)
-		remaining = trail_length - 1
-		quarter = remaining // 4
-		self.trail_chars = []
 		self.dead = False
-		for i in range(quarter):
-			self.trail_chars.append(random.choice(["I", "|", "i", "{", "}", "[", "]"]))
-		for i in range(quarter):
-			self.trail_chars.append(random.choice([":", ";"]))
-		for i in range(quarter):
-			self.trail_chars.append("∙")
-		for i in range(remaining - quarter * 3):
-			self.trail_chars.append("·")
+
+		self.gradient_1 = random.choice(["Ñ", "$", "#", "&", "@"])
+		
+		self.trail_length = random.randint(33, 42)
+		self.quarter = self.trail_length // 4
 
 	def update(self):
 		current_time = pygame.time.get_ticks()
 		if (current_time - self.drop_delay) - self.drop_start_time > 0:
 			self.current_y_pos += 1
 			self.drop_delay += self.velocity
+
 			self.gradient_1 = random.choice(["Ñ", "$", "#", "&", "@"])
+			self.gradient_2 = [random.choice(["I", "|", "i"]) for _ in range(self.quarter)]
+			self.gradient_3 = [random.choice([":", ";"]) for _ in range(self.quarter)]
+			self.gradient_4 = ["∙" for _ in range(self.quarter)]
+			self.gradient_5 = ["·" for _ in range(self.quarter)]
+			self.gradient_list = [self.gradient_2, self.gradient_3, self.gradient_4, self.gradient_5]
 
 		if self.current_y_pos < rows:
 			matrix_grid[self.current_y_pos][self.x_pos] = self.gradient_1
-		for i, char in enumerate(self.trail_chars):
-			y = self.current_y_pos - 1 - i
-			if 0 <= y < rows:
-				matrix_grid[y][self.x_pos] = char
-
-		if self.current_y_pos - len(self.trail_chars) >= rows:
+		for current_qrtr in range(1, 5):
+			quarter_y_pos = self.current_y_pos - current_qrtr * self.quarter
+			for i in range(quarter_y_pos, self.current_y_pos - (current_qrtr - 1) * self.quarter):
+				if 0 <= i < rows:
+					matrix_grid[i][self.x_pos] = self.gradient_list[current_qrtr - 1][i - (quarter_y_pos)]
+		if self.current_y_pos - self.trail_length >= rows:
 			self.dead = True
-
 #Inicio programa
 grids.append(copy.deepcopy(grid))
 clock : pygame.time.Clock = pygame.time.Clock()
@@ -331,14 +408,17 @@ while running:
 						draw_circle()
 				elif event.key == pygame.K_m:													# Ctrl + M - Alternar Matrix
 					matrix()
+				elif event.key == pygame.K_a:													# Ctrl + A - Alternar ADN
+					dna()
 				elif event.key == pygame.K_t:													# Ctrl + T - Testing Testing
-					print(matrix_drops)
+					print(matrix_drops.pop(0))
 			if event.mod & pygame.KMOD_CTRL and not event.mod & pygame.KMOD_RALT:		# No escribir si se está usando Ctrl
 				continue
 # CARACTERES-CARACTERES-CARACTERES-CARACTERES-CARACTERES-CARACTERES-CARACTERES
 			if selected_cell != None:
-				if event.key == pygame.K_ESCAPE and matrix_mode:
+				if event.key == pygame.K_ESCAPE and (matrix_mode or dna_mode):
 					matrix_mode = False
+					dna_mode = False
 				elif event.key == pygame.K_BACKSPACE:											# Backspace
 					move_selected_cell("left")
 					erase_selected_cells()
@@ -376,6 +456,8 @@ while running:
 			matrix_delay += random.randint(50, 100)
 
 	matrix_grid = [[" " for x in range(cols)] for y in range(rows)]
+	if dna_mode:
+		draw_dna()
 	for drop in matrix_drops[:]:
 		drop.update()
 		if drop.dead:
